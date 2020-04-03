@@ -22,28 +22,34 @@ class Population:
         self.intervention_demos = {}
         self.interventions = []
         self.resources = []
+        self.inf_hist = []
+        self.death_hist = []
 
         for d in demographics:
-            self.pop += d["size"]
-            self.infected += d["infected"]
+            self.pop += int(d["size"])
+            self.infected += int(d["infected"])
             self.demographics.append(
-                self.Demographic(d["name"], d["size"], d["infected"], d["cfr"], duration)
-            )
-
-        for i in interventions:
-            self.interventions.append(
-                self.Intervention(
-                    i["name"],
-                    i["criterion"],
-                    i["threshold"],
-                    i["demo_info"],
-                    i["variolation"],
-                    i["quarantine"],
+                self.Demographic(
+                    d["name"], int(d["size"]), int(d["infected"]), float(d["cfr"]), duration
                 )
             )
 
+        for i in interventions:
+            if i["name"]:
+                self.interventions.append(
+                    self.Intervention(
+                        i["name"],
+                        i["criterion"],
+                        i["threshold"],
+                        i["demo_info"],
+                        i["variolation"],
+                        i["quarantine"],
+                    )
+                )
+
         for r in resources:
-            self.resources.append(self.Resource(r["name"], r["number"], r["demo_info"]))
+            if r["name"]:
+                self.resources.append(self.Resource(r["name"], r["number"], r["demo_info"]))
 
     def init_variolation(self, intervention):
         info = intervention.demo_info
@@ -75,11 +81,20 @@ class Population:
                 demo.size += d.size
                 self.pop += d.size
                 demo.infected += d.infected
+                self.infected += d.infected
                 demo.sick += d.sick
                 demo.dead += d.dead
+                self.dead += d.dead
                 demo.immune += d.immune
                 for i in range(len(d.case_hist)):
-                    demo.case_hist[i] += d.case_hist[i]
+                    demo.case_hist[i] = (
+                        demo.case_hist[i][0] + d.case_hist[i][0],
+                        demo.case_hist[i][1],
+                    )
+                for i in range(len(d.inf_hist)):
+                    demo.inf_hist[i] += d.inf_hist[i]
+                    demo.death_hist[i] += d.death_hist[i]
+
             self.intervention_demos[intervention] = []
 
     def advance(self):
@@ -127,11 +142,15 @@ class Population:
 
             concluding = d.case_hist[self.day]
             deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
-            d.dead += deaths
-            d.infected -= deaths
+            if d.name[-2:] == "_V":
+                d.parent.dead += deaths
+            else:
+                self.infected -= deaths
+                d.infected -= deaths
+                d.dead += deaths
             d.sick -= deaths
             self.dead += deaths
-            self.infected -= deaths
+            d.death_hist.append(d.dead)
 
             new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
             d.sick += new_sick
@@ -144,12 +163,16 @@ class Population:
             if d.name[-2:] == "_V":
                 vulnerable = d.parent.size - d.parent.immune - d.parent.infected - d.parent.dead
                 new_cases = min(concluding[0], vulnerable)
+                if vulnerable < concluding[0]:
+                    d.parent.size += concluding[0] - vulnerable
+                    self.pop += concluding[0] - vulnerable
+                    d.size -= concluding[0] - vulnerable
+                    d.infected = d.size
             else:
                 self.infected += new_cases
-            if new_cases < 0:
-                print("fuckery")
+                d.infected += new_cases
             d.case_hist.append([new_cases, cfr])
-            d.infected += new_cases
+            d.inf_hist.append(d.infected)
 
             recoveries = concluding[0] - deaths
             if d.name[-2:] == "_V":
@@ -158,12 +181,20 @@ class Population:
                 d.infected -= recoveries
                 self.infected -= recoveries
                 d.immune += recoveries
-            d.sick -= recoveries
+            d.sick -= recoveries * (1 - self.asymp)
 
             for res in self.resources:
                 res.used += res.demo_info[d.name]["utilization"] * (
                     new_sick - concluding[0] * (1 - self.asymp)
                 )
+
+        self.inf_hist.append(self.infected)
+        self.death_hist.append(self.dead)
+
+    def get_hist(self):
+        data = {d.name: (d.inf_hist, d.death_hist) for d in self.demographics}
+        data["Total"] = (self.inf_hist, self.death_hist)
+        return data
 
     class Demographic:
         def __init__(
@@ -182,6 +213,8 @@ class Population:
             self.cfr = cfr
             self.quarantine = quarantine
             self.parent = parent
+            self.inf_hist = []
+            self.death_hist = []
 
     class Intervention:
         # demo_info must contain r_delta, cfr_delta, and quarantine capacity for each demo
@@ -190,8 +223,12 @@ class Population:
         ):
             self.name = name
             self.crit = criterion
-            self.threshold = threshold
-            self.demo_info = demo_info
+            self.threshold = int(threshold)
+            self.demo_info = {}
+            for dem in demo_info.keys():
+                self.demo_info[dem] = {}
+                for key in demo_info[dem].keys():
+                    self.demo_info[dem][key] = float(demo_info[dem][key])
             self.quarantine = quarantine
             self.variolation = variolation
             self.active = False
@@ -200,9 +237,13 @@ class Population:
         # demo_info is a dictionary of demographics, each containing a dictionary with utilization percentage and cfr_delta
         def __init__(self, name, number, demo_info):
             self.name = name
-            self.n = number
+            self.n = int(number)
             self.used = 0
-            self.demo_info = demo_info
+            self.demo_info = {}
+            for dem in demo_info.keys():
+                self.demo_info[dem] = {}
+                for key in demo_info[dem].keys():
+                    self.demo_info[dem][key] = float(demo_info[dem][key])
 
 
 # %%
@@ -234,16 +275,19 @@ if __name__ == "__main__":
             "name": "ventilators",
             "number": 62188,
             "demo_info": {
-                "UnderSixty": {"utilization": 0.01, "cfr_delta": 2},
-                "Sixties": {"utilization": 0.036, "cfr_delta": 2},
-                "Seventies": {"utilization": 0.08, "cfr_delta": 2},
-                "OverEighty": {"utilization": 0.148, "cfr_delta": 2},
+                "UnderSixty": {"utilization": 0.01, "cfr_delta": 3},
+                "Sixties": {"utilization": 0.036, "cfr_delta": 3},
+                "Seventies": {"utilization": 0.08, "cfr_delta": 3},
+                "OverEighty": {"utilization": 0.148, "cfr_delta": 3},
             },
         }
     ]
     pop = Population(2.1, 10, 25, 0.5, demos, inters, res)
-    for i in range(150):
+    for i in range(300):
         pop.advance()
+    for i in pop.interventions:
+        if i.active:
+            pop.end_intervention(i)
 
 
 # %%
