@@ -64,6 +64,7 @@ class Population:
                 self.dur,
                 intervention.quarantine,
                 d,
+                size,
                 self.day,
             )
             d.children.append(vdemo)
@@ -87,6 +88,7 @@ class Population:
                 self.dur,
                 True,
                 d,
+                info[d.name]["cap"],
                 self.day,
                 d.r_inf * info[d.name]["r_inf_delta"],
                 d.r_sick * info[d.name]["r_sick_delta"],
@@ -144,16 +146,7 @@ class Population:
                         elif i.quarantine:
                             self.init_quarantine(i)
 
-        dems = self.demographics
-        if self.intervention_demos.keys():
-            dems = list(
-                set(dems).union(
-                    demo
-                    for demo in self.intervention_demos[i]
-                    for i in self.intervention_demos.keys()
-                )
-            )
-        for d in dems:
+        for d in self.demographics:
             self.adv_demo(d)
 
         self.inf_hist.append(self.infected)
@@ -162,6 +155,9 @@ class Population:
     def adv_demo(self, d):
         r = self.r0
         cfr = d.cfr
+        for child in d.children:
+            self.adv_child_demo(child)
+
         for res in self.resources:
             if res.used > res.n:
                 cfr *= res.demo_info[d.name]["cfr_delta"]
@@ -284,6 +280,7 @@ class Population:
             duration,
             quarantine=False,
             parent=None,
+            cap=None,
             day=0,
             r_inf=0,
             r_sick=0,
@@ -303,6 +300,7 @@ class Population:
             self.r_sick = r_sick
             self.quarantine = quarantine
             self.parent = parent
+            self.cap = cap
             self.children = []
             self.inf_hist = []
             self.death_hist = []
