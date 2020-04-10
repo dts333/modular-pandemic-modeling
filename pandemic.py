@@ -74,6 +74,24 @@ class Population:
             for res in self.resources:
                 res.demo_info[d.name + "_V"] = res.demo_info[d.name]
 
+    def init_quarantine(self, intervention):
+        info = intervention.demo_info
+        self.intervention_demos[intervention] = []
+        for d in self.demographics:
+            qdemo = self.Demographic(
+                d.name + "_Q",
+                0,
+                0,
+                d.cfr * info[d.name]["cfr_delta"],
+                self.dur,
+                True,
+                d,
+                self.day,
+                d.r_inf * info[d.name]["r_inf_delta"],
+                d.r_sick * info[d.name]["r_sick_delta"],
+            )
+            self.intervention_demos[intervention].append(qdemo)
+
     def end_intervention(self, intervention):
         if intervention.quarantine:
             for d in self.intervention_demos[intervention]:
@@ -83,8 +101,6 @@ class Population:
                 demo.infected += d.infected
                 self.infected += d.infected
                 demo.sick += d.sick
-                demo.dead += d.dead
-                self.dead += d.dead
                 demo.immune += d.immune
                 for i in range(len(d.case_hist)):
                     demo.case_hist[i] = (
@@ -93,6 +109,7 @@ class Population:
                     )
                 for i in range(len(d.inf_hist)):
                     demo.inf_hist[i] += d.inf_hist[i]
+                    self.inf_hist[i] += d.inf_hist[i]
                     demo.death_hist[i] += d.death_hist[i]
 
             self.intervention_demos[intervention] = []
@@ -102,8 +119,11 @@ class Population:
         for i in self.interventions:
             if i.crit == "Infected":
                 if self.infected > i.threshold:
-                    if i.variolation and not i.active:
-                        self.init_variolation(i)
+                    if not i.active:
+                        if i.variolation:
+                            self.init_variolation(i)
+                        elif i.quarantine:
+                            self.init_quarantine(i)
                     i.active = True
                 else:
                     if i.active:
@@ -119,6 +139,8 @@ class Population:
                         i.active = True
                         if i.variolation:
                             self.init_variolation(i)
+                        elif i.quarantine:
+                            self.init_quarantine(i)
 
         dems = self.demographics
         if self.intervention_demos.keys():
@@ -136,18 +158,21 @@ class Population:
                 if res.used > res.n:
                     cfr *= res.demo_info[d.name]["cfr_delta"]
             for i in self.interventions:
-                if i.active and not i.variolation:
+                if i.active and not i.variolation and not i.quarantine:
                     r *= i.demo_info[d.name]["r_delta"]
                     cfr *= i.demo_info[d.name]["cfr_delta"]
 
             concluding = d.case_hist[self.day]
             deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
-            if d.name[-2:] == "_V":
+            if d.parent:
                 d.parent.dead += deaths
+                d.parent.size += deaths
+                d.size -= deaths
             else:
-                self.infected -= deaths
-                d.infected -= deaths
                 d.dead += deaths
+            if not d.quarantine:
+                self.infected -= deaths
+            d.infected -= deaths
             d.sick -= deaths
             self.dead += deaths
             d.death_hist.append(d.dead)
@@ -163,24 +188,36 @@ class Population:
             if d.name[-2:] == "_V":
                 vulnerable = d.parent.size - d.parent.immune - d.parent.infected - d.parent.dead
                 new_cases = min(concluding[0], vulnerable)
+                d.size += new_cases
+                d.parent.size -= new_cases
                 if vulnerable < concluding[0]:
-                    d.parent.size += concluding[0] - vulnerable
                     self.pop += concluding[0] - vulnerable
-                    d.size -= concluding[0] - vulnerable
-                    d.infected = d.size
-            else:
+            elif d.quarantine:
+                space = d.cap - d.size
+                if space > 0:
+                    admitting = min(d.parent.sick, space)
+                    d.parent.size -= admitting
+                    d.parent.infected -= admitting
+                    d.parent.sick -= admitting
+                    d.size += admitting
+                    d.infected += admitting
+                    d.sick += admitting
+            if not d.quarantine:
                 self.infected += new_cases
-                d.infected += new_cases
+            d.infected += new_cases
             d.case_hist.append([new_cases, cfr])
             d.inf_hist.append(d.infected)
 
             recoveries = concluding[0] - deaths
-            if d.name[-2:] == "_V":
+            if d.parent:
                 d.parent.immune += recoveries
+                d.parent.size += recoveries
+                d.size -= recoveries
             else:
-                d.infected -= recoveries
-                self.infected -= recoveries
                 d.immune += recoveries
+            if not d.quarantine:
+                self.infected -= recoveries
+            d.infected -= recoveries
             d.sick -= recoveries * (1 - self.asymp)
 
             for res in self.resources:
@@ -198,7 +235,17 @@ class Population:
 
     class Demographic:
         def __init__(
-            self, name, size, infected, cfr, duration, quarantine=False, parent=None, day=0
+            self,
+            name,
+            size,
+            infected,
+            cfr,
+            duration,
+            quarantine=False,
+            parent=None,
+            day=0,
+            r_inf=0,
+            r_sick=0,
         ):
             self.name = name
             self.size = size
@@ -211,6 +258,8 @@ class Population:
             self.dead = 0
             self.immune = 0
             self.cfr = cfr
+            self.r_inf = r_inf
+            self.r_sick = r_sick
             self.quarantine = quarantine
             self.parent = parent
             self.inf_hist = []
