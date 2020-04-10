@@ -66,6 +66,7 @@ class Population:
                 d,
                 self.day,
             )
+            d.children.append(vdemo)
             self.intervention_demos[intervention].append(vdemo)
             if intervention.quarantine:
                 d.size -= size
@@ -90,6 +91,7 @@ class Population:
                 d.r_inf * info[d.name]["r_inf_delta"],
                 d.r_sick * info[d.name]["r_sick_delta"],
             )
+            d.children.append(qdemo)
             self.intervention_demos[intervention].append(qdemo)
 
     def end_intervention(self, intervention):
@@ -152,81 +154,120 @@ class Population:
                 )
             )
         for d in dems:
-            r = self.r0
-            cfr = d.cfr
-            for res in self.resources:
-                if res.used > res.n:
-                    cfr *= res.demo_info[d.name]["cfr_delta"]
-            for i in self.interventions:
-                if i.active and not i.variolation and not i.quarantine:
-                    r *= i.demo_info[d.name]["r_delta"]
-                    cfr *= i.demo_info[d.name]["cfr_delta"]
-
-            concluding = d.case_hist[self.day]
-            deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
-            if d.parent:
-                d.parent.dead += deaths
-                d.parent.size += deaths
-                d.size -= deaths
-            else:
-                d.dead += deaths
-            if not d.quarantine:
-                self.infected -= deaths
-            d.infected -= deaths
-            d.sick -= deaths
-            self.dead += deaths
-            d.death_hist.append(d.dead)
-
-            new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
-            d.sick += new_sick
-
-            new_cases = int(
-                (d.size - d.immune - d.infected - d.dead)
-                * (r * self.infected / self.dur)
-                / self.pop
-            )
-            if d.name[-2:] == "_V":
-                vulnerable = d.parent.size - d.parent.immune - d.parent.infected - d.parent.dead
-                new_cases = min(concluding[0], vulnerable)
-                d.size += new_cases
-                d.parent.size -= new_cases
-                if vulnerable < concluding[0]:
-                    self.pop += concluding[0] - vulnerable
-            elif d.quarantine:
-                space = d.cap - d.size
-                if space > 0:
-                    admitting = min(d.parent.sick, space)
-                    d.parent.size -= admitting
-                    d.parent.infected -= admitting
-                    d.parent.sick -= admitting
-                    d.size += admitting
-                    d.infected += admitting
-                    d.sick += admitting
-            if not d.quarantine:
-                self.infected += new_cases
-            d.infected += new_cases
-            d.case_hist.append([new_cases, cfr])
-            d.inf_hist.append(d.infected)
-
-            recoveries = concluding[0] - deaths
-            if d.parent:
-                d.parent.immune += recoveries
-                d.parent.size += recoveries
-                d.size -= recoveries
-            else:
-                d.immune += recoveries
-            if not d.quarantine:
-                self.infected -= recoveries
-            d.infected -= recoveries
-            d.sick -= recoveries * (1 - self.asymp)
-
-            for res in self.resources:
-                res.used += res.demo_info[d.name]["utilization"] * (
-                    new_sick - concluding[0] * (1 - self.asymp)
-                )
+            self.adv_demo(d)
 
         self.inf_hist.append(self.infected)
         self.death_hist.append(self.dead)
+
+    def adv_demo(self, d):
+        r = self.r0
+        cfr = d.cfr
+        for res in self.resources:
+            if res.used > res.n:
+                cfr *= res.demo_info[d.name]["cfr_delta"]
+        for i in self.interventions:
+            if i.active and not i.variolation and not i.quarantine:
+                r *= i.demo_info[d.name]["r_delta"]
+                cfr *= i.demo_info[d.name]["cfr_delta"]
+
+        concluding = d.case_hist[self.day]
+        deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
+        d.dead += deaths
+        self.infected -= deaths
+        d.infected -= deaths
+        d.sick -= deaths
+        self.dead += deaths
+        d.death_hist.append(d.dead)
+
+        new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
+        d.sick += new_sick
+
+        new_cases = int(
+            (d.size - d.immune - d.infected - d.dead) * (r * self.infected / self.dur) / self.pop
+        )
+        self.infected += new_cases
+        d.infected += new_cases
+        d.case_hist.append([new_cases, cfr])
+        d.inf_hist.append(d.infected)
+
+        recoveries = concluding[0] - deaths
+        d.immune += recoveries
+        self.infected -= recoveries
+        d.infected -= recoveries
+        d.sick -= recoveries * (1 - self.asymp)
+
+        for res in self.resources:
+            res.used += res.demo_info[d.name]["utilization"] * (
+                new_sick - concluding[0] * (1 - self.asymp)
+            )
+
+    def adv_child_demo(self, d):
+        r = self.r0
+        cfr = d.cfr
+        for res in self.resources:
+            if res.used > res.n:
+                cfr *= res.demo_info[d.name]["cfr_delta"]
+        for i in self.interventions:
+            if i.active and not i.variolation and not i.quarantine:
+                r *= i.demo_info[d.name]["r_delta"]
+                cfr *= i.demo_info[d.name]["cfr_delta"]
+
+        concluding = d.case_hist[self.day]
+        deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
+        d.parent.dead += deaths
+        d.parent.size += deaths
+        d.size -= deaths
+        if d.quarantine:
+            self.pop += deaths
+        else:
+            self.infected -= deaths
+        d.infected -= deaths
+        d.sick -= deaths
+        self.dead += deaths
+        d.death_hist.append(d.dead)
+
+        new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
+        d.sick += new_sick
+
+        recoveries = concluding[0] - deaths
+        d.parent.immune += recoveries
+        d.parent.size += recoveries
+        d.size -= recoveries
+        if not d.quarantine:
+            self.infected -= recoveries
+        d.infected -= recoveries
+        d.sick -= recoveries * (1 - self.asymp)
+
+        new_cases = int(
+            (d.size - d.immune - d.infected - d.dead) * (r * self.infected / self.dur) / self.pop
+        )
+        if d.name[-2:] == "_V":
+            vulnerable = d.parent.size - d.parent.immune - d.parent.infected - d.parent.dead
+            new_cases = min(concluding[0], vulnerable)
+            d.size += new_cases
+            d.parent.size -= new_cases
+            if vulnerable < concluding[0]:
+                self.pop += concluding[0] - vulnerable
+        elif d.quarantine:
+            space = d.cap - d.size
+            if space > 0:
+                admitting = min(d.parent.sick, space)
+                d.parent.size -= admitting
+                d.parent.infected -= admitting
+                d.parent.sick -= admitting
+                d.size += admitting
+                d.infected += admitting
+                d.sick += admitting
+        if not d.quarantine:
+            self.infected += new_cases
+        d.infected += new_cases
+        d.case_hist.append([new_cases, cfr])
+        d.inf_hist.append(d.infected)
+
+        for res in self.resources:
+            res.used += res.demo_info[d.name]["utilization"] * (
+                new_sick - concluding[0] * (1 - self.asymp)
+            )
 
     def get_hist(self):
         data = {d.name: (d.inf_hist, d.death_hist) for d in self.demographics}
@@ -262,6 +303,7 @@ class Population:
             self.r_sick = r_sick
             self.quarantine = quarantine
             self.parent = parent
+            self.children = []
             self.inf_hist = []
             self.death_hist = []
 
