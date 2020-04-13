@@ -229,10 +229,12 @@ class Population:
         d.parent.immune += recoveries
         d.parent.size += recoveries
         d.size -= recoveries
-        if not d.quarantine:
-            self.infected -= recoveries
         d.infected -= recoveries
         d.sick -= recoveries * (1 - self.asymp)
+        if d.quarantine:
+            self.pop += recoveries
+        else:
+            self.infected -= recoveries
 
         new_cases = int(
             (d.size - d.immune - d.infected - d.dead) * (r * self.infected / self.dur) / self.pop
@@ -242,8 +244,8 @@ class Population:
             new_cases = min(concluding[0], vulnerable)
             d.size += new_cases
             d.parent.size -= new_cases
-            if vulnerable < concluding[0]:
-                self.pop += concluding[0] - vulnerable
+            if d.quarantine:
+                self.pop -= new_cases
         elif d.quarantine:
             space = d.cap - d.size
             if space > 0:
