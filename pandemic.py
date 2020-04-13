@@ -96,6 +96,9 @@ class Population:
             d.children.append(qdemo)
             self.intervention_demos[intervention].append(qdemo)
 
+            for res in self.resources:
+                res.demo_info[d.name + "_Q"] = res.demo_info[d.name]
+
     def end_intervention(self, intervention):
         if intervention.quarantine:
             for d in self.intervention_demos[intervention]:
