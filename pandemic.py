@@ -322,10 +322,10 @@ class Population:
             self.size = size
             self.infected = infected
             res_dict = {r.name: 0 for r in resources}
-            self.case_hist = [(0, 0, res_dict) for i in range(duration - 1)]
+            self.case_hist = [[0, 0, res_dict] for i in range(duration - 1)]
             for _ in range(day - 1):
-                self.case_hist.append((0, 0, res_dict))
-            self.case_hist.append((infected, cfr))
+                self.case_hist.append([0, 0, res_dict])
+            self.case_hist.append([infected])
             self.sick = 0
             self.dead = 0
             self.immune = 0
