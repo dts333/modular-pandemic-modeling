@@ -25,12 +25,21 @@ class Population:
         self.inf_hist = []
         self.death_hist = []
 
+        for r in resources:
+            if r["name"]:
+                self.resources.append(self.Resource(r["name"], r["number"], r["demo_info"]))
+
         for d in demographics:
             self.pop += int(d["size"])
             self.infected += int(d["infected"])
             self.demographics.append(
                 self.Demographic(
-                    d["name"], int(d["size"]), int(d["infected"]), float(d["cfr"]), duration
+                    d["name"],
+                    int(d["size"]),
+                    int(d["infected"]),
+                    float(d["cfr"]),
+                    duration,
+                    self.resources,
                 )
             )
 
@@ -47,10 +56,6 @@ class Population:
                     )
                 )
 
-        for r in resources:
-            if r["name"]:
-                self.resources.append(self.Resource(r["name"], r["number"], r["demo_info"]))
-
     def init_variolation(self, intervention):
         info = intervention.demo_info
         self.intervention_demos[intervention] = []
@@ -62,6 +67,7 @@ class Population:
                 size,
                 d.cfr * info[d.name]["cfr_delta"],
                 self.dur,
+                self.resources,
                 intervention.quarantine,
                 d,
                 size,
@@ -86,6 +92,7 @@ class Population:
                 0,
                 d.cfr * info[d.name]["cfr_delta"],
                 self.dur,
+                self.resources,
                 True,
                 d,
                 info[d.name]["cap"],
@@ -161,9 +168,6 @@ class Population:
         for child in d.children:
             self.adv_child_demo(child)
 
-        for res in self.resources:
-            if res.used > res.n:
-                cfr *= res.demo_info[d.name]["cfr_delta"]
         for i in self.interventions:
             if i.active and not i.variolation and not i.quarantine:
                 r *= i.demo_info[d.name]["r_delta"]
@@ -180,13 +184,31 @@ class Population:
 
         new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
         d.sick += new_sick
+        res_dict = {}
+        for res in self.resources:
+            res.used -= concluding[2][res.name]
+            res_avail = res.n - res.used
+            try:
+                cfr = cfr * (
+                    1
+                    + (res.demo_info[d.name]["cfr_delta"] - 1)
+                    * max(new_sick - res_avail, 0)
+                    / new_sick
+                )
+            except ZeroDivisionError:
+                pass
+            deploying = min(new_sick * res.demo_info[d.name]["utilization"], res_avail)
+            res_dict[res.name] = deploying
+            res.used += deploying
+        d.case_hist[-self.inc].append(cfr)
+        d.case_hist[-self.inc].append(res_dict)
 
         new_cases = int(
             (d.size - d.immune - d.infected - d.dead) * (r * self.infected / self.dur) / self.pop
         )
         self.infected += new_cases
         d.infected += new_cases
-        d.case_hist.append([new_cases, cfr])
+        d.case_hist.append([new_cases])
         d.inf_hist.append(d.infected)
 
         recoveries = concluding[0] - deaths
@@ -195,17 +217,9 @@ class Population:
         d.infected -= recoveries
         d.sick -= recoveries * (1 - self.asymp)
 
-        for res in self.resources:
-            res.used += res.demo_info[d.name]["utilization"] * (
-                new_sick - concluding[0] * (1 - self.asymp)
-            )
-
     def adv_child_demo(self, d):
         r = self.r0
         cfr = d.cfr
-        for res in self.resources:
-            if res.used > res.n:
-                cfr *= res.demo_info[d.name]["cfr_delta"]
         for i in self.interventions:
             if i.active and not i.variolation and not i.quarantine:
                 r *= i.demo_info[d.name]["r_delta"]
@@ -227,6 +241,24 @@ class Population:
 
         new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
         d.sick += new_sick
+        res_dict = {}
+        for res in self.resources:
+            res.used -= concluding[2][res.name]
+            res_avail = res.n - res.used
+            try:
+                cfr = cfr * (
+                    1
+                    + (res.demo_info[d.name]["cfr_delta"] - 1)
+                    * max(new_sick - res_avail, 0)
+                    / new_sick
+                )
+            except ZeroDivisionError:
+                pass
+            deploying = min(new_sick * res.demo_info[d.name]["utilization"], res_avail)
+            res_dict[res.name] = deploying
+            res.used += deploying
+        d.case_hist[-self.inc].append(cfr)
+        d.case_hist[-self.inc].append(res_dict)
 
         recoveries = concluding[0] - deaths
         d.parent.immune += recoveries
@@ -262,13 +294,8 @@ class Population:
         if not d.quarantine:
             self.infected += new_cases
         d.infected += new_cases
-        d.case_hist.append([new_cases, cfr])
+        d.case_hist.append([new_cases])
         d.inf_hist.append(d.infected)
-
-        for res in self.resources:
-            res.used += res.demo_info[d.name]["utilization"] * (
-                new_sick - concluding[0] * (1 - self.asymp)
-            )
 
     def get_hist(self):
         data = {d.name: (d.inf_hist, d.death_hist) for d in self.demographics}
@@ -283,6 +310,7 @@ class Population:
             infected,
             cfr,
             duration,
+            resources,
             quarantine=False,
             parent=None,
             cap=None,
@@ -293,9 +321,10 @@ class Population:
             self.name = name
             self.size = size
             self.infected = infected
-            self.case_hist = [(0, 0) for i in range(duration - 1)]
+            res_dict = {r.name: 0 for r in resources}
+            self.case_hist = [(0, 0, res_dict) for i in range(duration - 1)]
             for _ in range(day - 1):
-                self.case_hist.append((0, 0))
+                self.case_hist.append((0, 0, res_dict))
             self.case_hist.append((infected, cfr))
             self.sick = 0
             self.dead = 0
