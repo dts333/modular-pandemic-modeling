@@ -95,11 +95,6 @@ class Population:
         for child in d.children:
             self.adv_child_demo(child)
 
-        for i in self.interventions:
-            if i.active and not i.variolation and not i.quarantine:
-                r *= i.demo_info[d.name]["r_delta"]
-                cfr *= i.demo_info[d.name]["cfr_delta"]
-
         concluding = d.case_hist[self.day]
         deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
         d.dead += deaths
@@ -154,10 +149,6 @@ class Population:
 
     def adv_child_demo(self, d):
         cfr = d.cfr
-        for i in self.interventions:
-            if i.active and not i.variolation and not i.quarantine:
-                r *= i.demo_info[d.name]["r_delta"]
-                cfr *= i.demo_info[d.name]["cfr_delta"]
 
         concluding = d.case_hist[self.day]
         deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
