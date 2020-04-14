@@ -7,17 +7,27 @@ If a vulnerable group is more likely to be given the resources, they should be l
 #%%
 class Population:
     def __init__(
-        self, r0, incubation, duration, asymptomatic, demographics, interventions, resources
+        self,
+        r_inf,
+        r_sick,
+        incubation,
+        duration,
+        asymptomatic,
+        demographics,
+        interventions,
+        resources,
     ):
         self.day = 0
         self.pop = 0
         self.infected = 0
+        self.sick = 0
         self.dead = 0
-        self.r0 = r0
+        self.r_inf = r_inf
+        self.r_sick = r_sick
         self.inc = incubation
         self.dur = duration
-        self.asymp = asymptomatic
         self.sick_dur = duration - incubation
+        self.asymp = asymptomatic
         self.demographics = []
         self.intervention_demos = {}
         self.interventions = []
@@ -163,7 +173,6 @@ class Population:
         self.death_hist.append(self.dead)
 
     def adv_demo(self, d):
-        r = self.r0
         cfr = d.cfr
         for child in d.children:
             self.adv_child_demo(child)
@@ -178,12 +187,14 @@ class Population:
         d.dead += deaths
         self.infected -= deaths
         d.infected -= deaths
+        self.sick -= deaths
         d.sick -= deaths
         self.dead += deaths
         d.death_hist.append(d.dead)
 
         new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
         d.sick += new_sick
+        self.sick += new_sick
         res_dict = {}
         for res in self.resources:
             res.used -= concluding[2][res.name]
@@ -204,7 +215,12 @@ class Population:
         d.case_hist[-self.inc].append(res_dict)
 
         new_cases = int(
-            (d.size - d.immune - d.infected - d.dead) * (r * self.infected / self.dur) / self.pop
+            (d.size - d.immune - d.infected - d.dead)
+            * (
+                (self.r_inf * (self.infected - self.sick) / self.inc)
+                + (self.r_sick * self.sick / self.sick_dur)
+            )
+            / self.pop
         )
         self.infected += new_cases
         d.infected += new_cases
@@ -215,10 +231,10 @@ class Population:
         d.immune += recoveries
         self.infected -= recoveries
         d.infected -= recoveries
+        self.sick -= recoveries * (1 - self.asymp)
         d.sick -= recoveries * (1 - self.asymp)
 
     def adv_child_demo(self, d):
-        r = self.r0
         cfr = d.cfr
         for i in self.interventions:
             if i.active and not i.variolation and not i.quarantine:
@@ -234,6 +250,7 @@ class Population:
             self.pop += deaths
         else:
             self.infected -= deaths
+            self.sick -= deaths
         d.infected -= deaths
         d.sick -= deaths
         self.dead += deaths
@@ -241,6 +258,8 @@ class Population:
 
         new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
         d.sick += new_sick
+        if not d.quarantine:
+            self.sick += new_sick
         res_dict = {}
         for res in self.resources:
             res.used -= concluding[2][res.name]
@@ -270,9 +289,12 @@ class Population:
             self.pop += recoveries
         else:
             self.infected -= recoveries
+            self.sick -= recoveries * (1 - self.asymp)
 
         new_cases = int(
-            (d.size - d.immune - d.infected - d.dead) * (r * self.infected / self.dur) / self.pop
+            (d.size - d.immune - d.infected - d.dead)
+            * ((self.r_inf * self.infected / self.inc) + (self.r_sick * self.sick / self.sick_dur))
+            / self.pop
         )
         if d.name[-2:] == "_V":
             vulnerable = d.parent.size - d.parent.immune - d.parent.infected - d.parent.dead
