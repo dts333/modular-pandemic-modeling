@@ -66,56 +66,6 @@ class Population:
                     )
                 )
 
-    def init_variolation(self, intervention):
-        info = intervention.demo_info
-        self.intervention_demos[intervention] = []
-        for d in self.demographics:
-            size = info[d.name]["capacity"]
-            vdemo = self.Demographic(
-                name=d.name + "_V",
-                size=size,
-                infected=size,
-                cfr=d.cfr * info[d.name]["cfr_delta"],
-                duration=self.dur,
-                resources=self.resources,
-                quarantine=intervention.quarantine,
-                parent=d,
-                cap=size,
-                day=self.day,
-            )
-            d.children.append(vdemo)
-            self.intervention_demos[intervention].append(vdemo)
-            if intervention.quarantine:
-                d.size -= size
-                self.pop -= size
-
-            for res in self.resources:
-                res.demo_info[d.name + "_V"] = res.demo_info[d.name]
-
-    def init_quarantine(self, intervention):
-        info = intervention.demo_info
-        self.intervention_demos[intervention] = []
-        for d in self.demographics:
-            qdemo = self.Demographic(
-                d.name + "_Q",
-                0,
-                0,
-                d.cfr * info[d.name]["cfr_delta"],
-                self.dur,
-                self.resources,
-                True,
-                d,
-                info[d.name]["cap"],
-                self.day,
-                d.r_inf * info[d.name]["r_inf_delta"],
-                d.r_sick * info[d.name]["r_sick_delta"],
-            )
-            d.children.append(qdemo)
-            self.intervention_demos[intervention].append(qdemo)
-
-            for res in self.resources:
-                res.demo_info[d.name + "_Q"] = res.demo_info[d.name]
-
     def end_intervention(self, intervention):
         if intervention.quarantine:
             for d in self.intervention_demos[intervention]:
@@ -144,11 +94,7 @@ class Population:
             if i.crit == "Infected":
                 if self.infected > i.threshold:
                     if not i.active:
-                        if i.variolation:
-                            self.init_variolation(i)
-                        elif i.quarantine:
-                            self.init_quarantine(i)
-                    i.active = True
+                        i.activate(self.demographics, self.resources, self.day, self.dur)
                 else:
                     if i.active:
                         self.end_intervention(i)
@@ -160,11 +106,7 @@ class Population:
                         i.active = False
                         self.end_intervention(i)
                     else:
-                        i.active = True
-                        if i.variolation:
-                            self.init_variolation(i)
-                        elif i.quarantine:
-                            self.init_quarantine(i)
+                        i.activate(self.demographics, self.resources, self.day, self.dur)
 
         for d in self.demographics:
             self.adv_demo(d)
@@ -370,6 +312,7 @@ class Population:
             self.crit = criterion
             self.threshold = int(threshold)
             self.demo_info = {}
+            self.demos = []
             for dem in demo_info.keys():
                 self.demo_info[dem] = {}
                 for key in demo_info[dem].keys():
@@ -377,6 +320,40 @@ class Population:
             self.quarantine = quarantine
             self.variolation = variolation
             self.active = False
+
+        def activate(self, demos, resources, day, duration):
+            self.active = True
+            if self.quarantine:
+                token = "_Q"
+                size = 0
+            elif self.variolation:
+                token = "_V"
+            for d in demos:
+                if self.variolation:
+                    size = self.demo_info[d.name]["capacity"]
+                demo = self.Demographic(
+                    name=d.name + token,
+                    size=size,
+                    infected=size,
+                    cfr=d.cfr * self.demo_info[d.name]["cfr_delta"],
+                    duration=duration,
+                    resources=resources,
+                    quarantine=self.quarantine,
+                    parent=d,
+                    cap=self.demo_info[d.name]["cap"],
+                    day=day,
+                    r_inf=d.r_inf * self.demo_info[d.name]["r_inf_delta"],
+                    r_sick=d.r_sick * self.demo_info[d.name]["r_sick_delta"],
+                )
+                d.children.append(demo)
+                self.demos.append(demo)
+
+                if self.quarantine:
+                    d.size -= size
+                    self.pop -= size
+
+                for res in resources:
+                    res.demo_info[d.name + token] = res.demo_info[d.name]
 
     class Resource:
         # demo_info is a dictionary of demographics, each containing a dictionary with utilization percentage and cfr_delta
