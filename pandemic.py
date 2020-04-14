@@ -66,28 +66,6 @@ class Population:
                     )
                 )
 
-    def end_intervention(self, intervention):
-        if intervention.quarantine:
-            for d in self.intervention_demos[intervention]:
-                demo = d.parent
-                demo.size += d.size
-                self.pop += d.size
-                demo.infected += d.infected
-                self.infected += d.infected
-                demo.sick += d.sick
-                demo.immune += d.immune
-                for i in range(len(d.case_hist)):
-                    demo.case_hist[i] = (
-                        demo.case_hist[i][0] + d.case_hist[i][0],
-                        demo.case_hist[i][1],
-                    )
-                for i in range(len(d.inf_hist)):
-                    demo.inf_hist[i] += d.inf_hist[i]
-                    self.inf_hist[i] += d.inf_hist[i]
-                    demo.death_hist[i] += d.death_hist[i]
-
-            self.intervention_demos[intervention] = []
-
     def advance(self):
         self.day += 1
         for i in self.interventions:
@@ -97,14 +75,12 @@ class Population:
                         i.activate(self.demographics, self.resources, self.day, self.dur)
                 else:
                     if i.active:
-                        self.end_intervention(i)
-                    i.active = False
+                        i.deactivate()
 
             elif i.crit == "Day":
                 if self.day in i.threshold:
                     if i.active:
-                        i.active = False
-                        self.end_intervention(i)
+                        i.deactivate()
                     else:
                         i.activate(self.demographics, self.resources, self.day, self.dur)
 
@@ -354,6 +330,26 @@ class Population:
 
                 for res in resources:
                     res.demo_info[d.name + token] = res.demo_info[d.name]
+
+        def deactivate(self):
+            for d in self.demos:
+                demo = d.parent
+                demo.size += d.size
+                demo.infected += d.infected
+                demo.sick += d.sick
+                demo.immune += d.immune
+                if self.quarantine:
+                    self.pop += d.size
+                    self.infected += d.infected
+                    self.sick += d.sick
+                for i in range(len(d.case_hist)):
+                    demo.case_hist[i][0] += d.case_hist[i][0]
+                for i in range(len(d.inf_hist)):
+                    demo.inf_hist[i] += d.inf_hist[i]
+                    self.inf_hist[i] += d.inf_hist[i]
+                    demo.death_hist[i] += d.death_hist[i]
+
+            self.demos = []
 
     class Resource:
         # demo_info is a dictionary of demographics, each containing a dictionary with utilization percentage and cfr_delta
