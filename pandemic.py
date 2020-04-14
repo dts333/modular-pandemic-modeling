@@ -34,12 +34,12 @@ class Population:
             self.infected += int(d["infected"])
             self.demographics.append(
                 self.Demographic(
-                    d["name"],
-                    int(d["size"]),
-                    int(d["infected"]),
-                    float(d["cfr"]),
-                    duration,
-                    self.resources,
+                    name=d["name"],
+                    size=int(d["size"]),
+                    infected=int(d["infected"]),
+                    cfr=float(d["cfr"]),
+                    duration=duration,
+                    resources=self.resources,
                 )
             )
 
@@ -62,16 +62,16 @@ class Population:
         for d in self.demographics:
             size = info[d.name]["capacity"]
             vdemo = self.Demographic(
-                d.name + "_V",
-                size,
-                size,
-                d.cfr * info[d.name]["cfr_delta"],
-                self.dur,
-                self.resources,
-                intervention.quarantine,
-                d,
-                size,
-                self.day,
+                name=d.name + "_V",
+                size=size,
+                infected=size,
+                cfr=d.cfr * info[d.name]["cfr_delta"],
+                duration=self.dur,
+                resources=self.resources,
+                quarantine=intervention.quarantine,
+                parent=d,
+                cap=size,
+                day=self.day,
             )
             d.children.append(vdemo)
             self.intervention_demos[intervention].append(vdemo)
