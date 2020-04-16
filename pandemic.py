@@ -300,7 +300,7 @@ class Population:
             else:
                 token = "_I"
             for d in demos:
-                size = self.demo_info[d.name]["capacity"]
+                size = int(self.demo_info[d.name]["capacity"])
                 demo = self.pop.Demographic(
                     name=d.name + token,
                     size=size,
@@ -310,7 +310,7 @@ class Population:
                     resources=resources,
                     quarantine=self.quarantine,
                     parent=d,
-                    cap=self.demo_info[d.name]["capacity"],
+                    cap=int(self.demo_info[d.name]["capacity"]),
                     day=day,
                     r_inf=d.r_inf * self.demo_info[d.name]["r_inf_delta"],
                     r_sick=d.r_sick * self.demo_info[d.name]["r_sick_delta"],
@@ -332,6 +332,7 @@ class Population:
                 demo.infected += d.infected
                 demo.sick += d.sick
                 demo.immune += d.immune
+                demo.children.remove(d)
                 for i in range(len(d.case_hist)):
                     demo.case_hist[i][0] += d.case_hist[i][0]
                 for i in range(len(d.inf_hist)):
@@ -354,8 +355,6 @@ class Population:
                     self.demo_info[dem][key] = float(demo_info[dem][key])
 
 
-# %%
-q_all = [q_all]
 # %%
 
 if __name__ == "__main__":
