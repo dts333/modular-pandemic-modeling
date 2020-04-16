@@ -1,9 +1,3 @@
-""" 
-Scarce resources are assigned as cases come in and cases come in in the order demographics are listed.
-If a vulnerable group is more likely to be given the resources, they should be listed first.
-"""
-#%%
-
 #%%
 class Population:
     def __init__(
@@ -50,6 +44,8 @@ class Population:
                     cfr=float(d["cfr"]),
                     duration=duration,
                     resources=self.resources,
+                    r_inf=float(d["r_inf"]),
+                    r_sick=float(d["r_sick"]),
                 )
             )
 
@@ -63,6 +59,8 @@ class Population:
                         i["demo_info"],
                         i["variolation"],
                         i["quarantine"],
+                        i["leakage"],
+                        self,
                     )
                 )
 
@@ -84,16 +82,24 @@ class Population:
                     else:
                         i.activate(self.demographics, self.resources, self.day, self.dur)
 
+        effinf = 0
+        effsick = 0
+        for demo in self.demographics:
+            effinf += (demo.infected - demo.sick) * demo.r_inf
+            effsick += demo.sick * demo.r_sick
+            for d in demo.children:
+                effinf += (d.infected - d.sick) * d.r_inf
+                effsick += d.sick * d.r_sick
         for d in self.demographics:
-            self.adv_demo(d)
+            self.adv_demo(d, effinf, effsick)
 
         self.inf_hist.append(self.infected)
         self.death_hist.append(self.dead)
 
-    def adv_demo(self, d):
+    def adv_demo(self, d, effinf, effsick):
         cfr = d.cfr
         for child in d.children:
-            self.adv_child_demo(child)
+            self.adv_child_demo(child, effinf, effsick)
 
         concluding = d.case_hist[self.day]
         deaths = int(concluding[0] * concluding[1] * (1 - self.asymp))
@@ -129,10 +135,7 @@ class Population:
 
         new_cases = int(
             (d.size - d.immune - d.infected - d.dead)
-            * (
-                (self.r_inf * (self.infected - self.sick) / self.inc)
-                + (self.r_sick * self.sick / self.sick_dur)
-            )
+            * ((effinf / self.inc) + (effsick / self.sick_dur))
             / self.pop
         )
         self.infected += new_cases
@@ -147,7 +150,7 @@ class Population:
         self.sick -= recoveries * (1 - self.asymp)
         d.sick -= recoveries * (1 - self.asymp)
 
-    def adv_child_demo(self, d):
+    def adv_child_demo(self, d, effinf, effsick):
         cfr = d.cfr
 
         concluding = d.case_hist[self.day]
@@ -155,11 +158,8 @@ class Population:
         d.parent.dead += deaths
         d.parent.size += deaths
         d.size -= deaths
-        if d.quarantine:
-            self.pop += deaths
-        else:
-            self.infected -= deaths
-            self.sick -= deaths
+        self.infected -= deaths
+        self.sick -= deaths
         d.infected -= deaths
         d.sick -= deaths
         self.dead += deaths
@@ -167,8 +167,7 @@ class Population:
 
         new_sick = d.case_hist[-self.inc][0] * (1 - self.asymp)
         d.sick += new_sick
-        if not d.quarantine:
-            self.sick += new_sick
+        self.sick += new_sick
         res_dict = {}
         for res in self.resources:
             res.used -= concluding[2][res.name]
@@ -194,15 +193,12 @@ class Population:
         d.size -= recoveries
         d.infected -= recoveries
         d.sick -= recoveries * (1 - self.asymp)
-        if d.quarantine:
-            self.pop += recoveries
-        else:
-            self.infected -= recoveries
-            self.sick -= recoveries * (1 - self.asymp)
+        self.infected -= recoveries
+        self.sick -= recoveries * (1 - self.asymp)
 
         new_cases = int(
             (d.size - d.immune - d.infected - d.dead)
-            * ((self.r_inf * self.infected / self.inc) + (self.r_sick * self.sick / self.sick_dur))
+            * ((effinf / self.inc) + (effsick / self.sick_dur))
             / self.pop
         )
         if d.name[-2:] == "_V":
@@ -210,20 +206,15 @@ class Population:
             new_cases = min(concluding[0], vulnerable)
             d.size += new_cases
             d.parent.size -= new_cases
-            if d.quarantine:
-                self.pop -= new_cases
         elif d.quarantine:
+            new_cases = int(d.leakage * new_cases)
             space = d.cap - d.size
             if space > 0:
-                admitting = min(d.parent.sick, space)
+                vulnerable = d.parent.size - d.parent.immune - d.parent.infected - d.parent.dead
+                admitting = min(vulnerable, space)
                 d.parent.size -= admitting
-                d.parent.infected -= admitting
-                d.parent.sick -= admitting
                 d.size += admitting
-                d.infected += admitting
-                d.sick += admitting
-        if not d.quarantine:
-            self.infected += new_cases
+        self.infected += new_cases
         d.infected += new_cases
         d.case_hist.append([new_cases])
         d.inf_hist.append(d.infected)
@@ -248,6 +239,7 @@ class Population:
             day=0,
             r_inf=0,
             r_sick=0,
+            leakage=0,
         ):
             self.name = name
             self.size = size
@@ -264,6 +256,7 @@ class Population:
             self.r_inf = r_inf
             self.r_sick = r_sick
             self.quarantine = quarantine
+            self.leakage = leakage
             self.parent = parent
             self.cap = cap
             self.children = []
@@ -273,7 +266,15 @@ class Population:
     class Intervention:
         # demo_info must contain r_delta, cfr_delta, and quarantine capacity for each demo
         def __init__(
-            self, name, criterion, threshold, demo_info, variolation=False, quarantine=False
+            self,
+            name,
+            criterion,
+            threshold,
+            demo_info,
+            variolation=False,
+            quarantine=False,
+            leakage=0,
+            pop=None,
         ):
             self.name = name
             self.crit = criterion
@@ -285,20 +286,22 @@ class Population:
                 for key in demo_info[dem].keys():
                     self.demo_info[dem][key] = float(demo_info[dem][key])
             self.quarantine = quarantine
+            self.leakage = leakage
             self.variolation = variolation
             self.active = False
+            self.pop = pop
 
         def activate(self, demos, resources, day, duration):
             self.active = True
-            if self.quarantine:
-                token = "_Q"
-                size = 0
-            elif self.variolation:
+            if self.variolation:
                 token = "_V"
+            elif self.quarantine:
+                token = "_Q"
+            else:
+                token = "_I"
             for d in demos:
-                if self.variolation:
-                    size = self.demo_info[d.name]["capacity"]
-                demo = self.Demographic(
+                size = self.demo_info[d.name]["capacity"]
+                demo = self.pop.Demographic(
                     name=d.name + token,
                     size=size,
                     infected=size,
@@ -307,17 +310,17 @@ class Population:
                     resources=resources,
                     quarantine=self.quarantine,
                     parent=d,
-                    cap=self.demo_info[d.name]["cap"],
+                    cap=self.demo_info[d.name]["capacity"],
                     day=day,
                     r_inf=d.r_inf * self.demo_info[d.name]["r_inf_delta"],
                     r_sick=d.r_sick * self.demo_info[d.name]["r_sick_delta"],
+                    leakage=self.leakage,
                 )
                 d.children.append(demo)
                 self.demos.append(demo)
 
                 if self.quarantine:
                     d.size -= size
-                    self.pop -= size
 
                 for res in resources:
                     res.demo_info[d.name + token] = res.demo_info[d.name]
@@ -329,15 +332,11 @@ class Population:
                 demo.infected += d.infected
                 demo.sick += d.sick
                 demo.immune += d.immune
-                if self.quarantine:
-                    self.pop += d.size
-                    self.infected += d.infected
-                    self.sick += d.sick
                 for i in range(len(d.case_hist)):
                     demo.case_hist[i][0] += d.case_hist[i][0]
                 for i in range(len(d.inf_hist)):
                     demo.inf_hist[i] += d.inf_hist[i]
-                    self.inf_hist[i] += d.inf_hist[i]
+                    self.pop.inf_hist[i] += d.inf_hist[i]
                     demo.death_hist[i] += d.death_hist[i]
 
             self.demos = []
@@ -355,6 +354,8 @@ class Population:
                     self.demo_info[dem][key] = float(demo_info[dem][key])
 
 
+# %%
+q_all = [q_all]
 # %%
 
 if __name__ == "__main__":
