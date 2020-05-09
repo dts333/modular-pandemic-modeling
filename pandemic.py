@@ -36,6 +36,14 @@ class Population:
         for d in demographics:
             self.pop += int(d["size"])
             self.infected += int(d["infected"])
+            try:
+                drinf = float(d["r_inf"])
+            except KeyError:
+                drinf = r_inf
+            try:
+                drsick = float(d["r_sick"])
+            except KeyError:
+                drsick = r_sick
             self.demographics.append(
                 self.Demographic(
                     name=d["name"],
@@ -44,8 +52,8 @@ class Population:
                     cfr=float(d["cfr"]),
                     duration=duration,
                     resources=self.resources,
-                    r_inf=float(d["r_inf"]),
-                    r_sick=float(d["r_sick"]),
+                    r_inf=drinf,
+                    r_sick=drsick,
                 )
             )
 
